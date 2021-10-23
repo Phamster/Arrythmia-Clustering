@@ -1,6 +1,6 @@
 ---
 title: 'Projekt: Herzrhythmusstoerungen Cluster- und Hauptkomponenten Analyse'
-author: 'Isi Aurelia Ighedosa, David Pham,  Louis Reichenheim'
+author: 'David Pham'
 encoding: utf8
 always_allow_html: yes
 output:
