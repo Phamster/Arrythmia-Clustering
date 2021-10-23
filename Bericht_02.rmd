@@ -1,0 +1,800 @@
+---
+title: 'Projekt: Herzrhythmusstoerungen Cluster- und Hauptkomponenten Analyse'
+author: 'Isi Aurelia Ighedosa, David Pham,  Louis Reichenheim'
+encoding: utf8
+always_allow_html: yes
+output:
+  html_document:
+    code_folding: show
+    df_print: paged
+    fig_height: 5
+    fig_width: 7
+    number_sections: yes
+    toc: yes
+    toc_depth: 4
+    toc_float: yes
+  pdf_document:
+    df_print: paged
+    toc: yes
+    keep_tex: yes
+    number_sections: yes
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+params <- list(html=knitr::is_html_output())
+knitr::opts_chunk$set(echo = params$html, eval=TRUE, message=FALSE, cache=TRUE)
+
+```
+
+# Einleitung
+Die folgende Untersuchung bezieht sich auf den Arrhythmia Datensatz aus dem UCI Machine Learning Repository. Ziel ist es eine Cluster- und Hauptkomponenten Analyse durchzufuehren und zu untersuchen ob die Ergebnisse mit den wahren Klassifizierungen uebereinstimmen. 
+
+Der Datensatz enthaelt die Ergebnisse eines Elektrokardiogramm von 452 Patienten mit jeweils 279 Attributen von denen 206 linear und 73 nominal sind. Darunter klassische Daten wie Alter, Gewicht und Koerpergroesse, aber hauptsaechlich handelt es sich hierbei um die sensorischen Daten der 12 Kanaele des EKG's.
+Desweiteren beinhaltet der Datensatz die wahre Herzrythmusklassifizierung des Patienten die wir zur Wertung unserer eigenen Analyse heranziehen werden.
+
+
+# Vorbereitung
+```{r Vorbereitung, message=FALSE}
+require("psych")
+require("AER")
+require("mlbench")
+require("cluster")
+require("zoo")
+require("plyr")
+require("factoextra")
+require("dendextend")
+require("matrixStats") ## for rowSums, rowMeans....
+require("factoextra")
+require("visdat")
+require(plot.matrix)
+farben <- c("#8DD3C7","#FFFFB3","#BEBADA","#FB8072","#80B1D3","#FDB462","#B3DE69","#FCCDE5","#D9D9D9","#BC80BD","#B0E2FF","#EE799F","#CCEBC5")
+
+##  Daten einlesen ##
+setwd("C:/Users/David/Documents/Uni/Explorative Datenanalyse/1. Projekt")
+arrhythmia <- read.csv("https://archive.ics.uci.edu/ml/machine-learning-databases/arrhythmia/arrhythmia.data", header = FALSE, na.strings = "?" )
+
+## ergaenze relevante Spaltennamen
+names(arrhythmia)[c(1:15,280)] <- c("Age", "Sex", "Height", "Weight", "QRS_duration", "P_R_interval", "Q_T_interval", "T_interval", "P_interval", "QRS", "T", "P","QRST","J","Heartrate","class")
+```
+
+# Allgemeine Inspektion der Daten
+Auf der Machine Learning Repository Website kann man den Aufbau des Datensatzes ablesen:
+
+      1 Age: Age in years , linear
+      2 Sex: Sex (0 = male; 1 = female) , nominal
+      3 Height: Height in centimeters , linear
+      4 Weight: Weight in kilograms , linear
+      5 QRS duration: Average of QRS duration in msec., linear
+      6 P-R interval: Average duration between onset of P and Q waves
+        in msec., linear
+      7 Q-T interval: Average duration between onset of Q and offset
+        of T waves in msec., linear
+      8 T interval: Average duration of T wave in msec., linear
+      9 P interval: Average duration of P wave in msec., linear
+     Vector angles in degrees on front plane of:, linear
+     10 QRS
+     11 T
+     12 P
+     13 QRST
+     14 J
+
+     15 Heart rate: Number of heart beats per minute ,linear
+    
+     Of channel DI:
+      Average width, in msec., of: linear
+      16 Q wave
+      17 R wave
+      18 S wave
+      19 R' wave, small peak just after R
+      20 S' wave
+
+      21 Number of intrinsic deflections, linear
+
+      22 Existence of ragged R wave, nominal
+      23 Existence of diphasic derivation of R wave, nominal
+      24 Existence of ragged P wave, nominal
+      25 Existence of diphasic derivation of P wave, nominal
+      26 Existence of ragged T wave, nominal
+      27 Existence of diphasic derivation of T wave, nominal
+
+     Of channel DII: 
+      28 .. 39 (similar to 16 .. 27 of channel DI)
+     Of channels DIII:
+      40 .. 51
+     Of channel AVR:
+      52 .. 63
+     Of channel AVL:
+      64 .. 75
+     Of channel AVF:
+      76 .. 87
+     Of channel V1:
+      88 .. 99
+     Of channel V2:
+      100 .. 111
+     Of channel V3:
+      112 .. 123
+     Of channel V4:
+      124 .. 135
+     Of channel V5:
+      136 .. 147
+     Of channel V6:
+      148 .. 159
+
+     Of channel DI:
+      Amplitude , * 0.1 milivolt, of
+      160 JJ wave, linear
+      161 Q wave, linear
+      162 R wave, linear
+      163 S wave, linear
+      164 R' wave, linear
+      165 S' wave, linear
+      166 P wave, linear
+      167 T wave, linear
+      
+      168 QRSA , Sum of areas of all segments divided by 10,
+          ( Area= width * height / 2 ), linear
+      169 QRSTA = QRSA + 0.5 * width of T wave * 0.1 * height of T
+          wave. (If T is diphasic then the bigger segment is
+          considered), linear
+
+     Of channel DII:
+      170 .. 179
+     Of channel DIII:
+      180 .. 189
+     Of channel AVR:
+      190 .. 199
+     Of channel AVL:
+      200 .. 209
+     Of channel AVF:
+      210 .. 219
+     Of channel V1:
+      220 .. 229
+     Of channel V2:
+      230 .. 239
+     Of channel V3:
+      240 .. 249
+     Of channel V4:
+      250 .. 259
+     Of channel V5:
+      260 .. 269
+     Of channel V6:
+      270 .. 279
+
+In den ersten 4 Spalten stehen allgemeine Daten der Patienten und in den uebrigen 276 die Ergebnisse des EKG's. Dabei handelt es sich zum Grossteil um Daten wie Dauer und Amplitude der verschiedenen Wellen pro Kanal.
+
+## Untersuchung des Datensatzes 
+
+Um einen besseren Ueberblick ueber die Daten zu gewinnen werden die Funktionen summary(), str() und describe() aus der psych library benutzt. Da im Datensatz sehr viele fuer schwer zu interpretierende Daten vorliegen, belassen wir unseren Fokus auf den ersten vier Spalten.
+
+```{r DatenInspektion Zusammenfassung, eval=TRUE}
+#summary(arrhythmia)
+psych::describe(arrhythmia)
+```
+
+Das Durchschnittsalter der Befragten liegt bei 46.47, dass liegt vermutlich daran das Herzrythmusstoerungen in der Regel erst im Alter zum Problem wird und demnach eher bei aelteren getestet wird. Der Anteil der weiblichen Patienten ist etwas hoeher, dass durchschnittliche Gewicht liegt bei 68.17 kg und die durchschnittliche  Koerpergroesse bei 166.19 cm. Wir sehen ausserdem das es einige Missing Values gibt.
+
+## Untersuchung der wahren Klassifizierungen
+
+Als naechstes werden die wahren Herzrythmusklassifizierungen untersuchen, um einen Einblick in die Verteilung der Krankheitsfaelle ueber die Patienten zu erlangen. 
+
+```{r DatenInspektion wahre Klassifizierung}
+trueclus <- as.numeric(arrhythmia$class)
+table(trueclus)
+```
+Aus dem Machine learning Repository kann man folgende Zusatzinformationen zur Klassifizierung gewinnen.
+
+       Class code :   Class   :                       Number of instances:
+       01             Normal                                      245 
+       02             Ischemic changes (Coronary Artery Disease)   44
+       03             Old Anterior Myocardial Infarction           15
+       04             Old Inferior Myocardial Infarction           15
+       05             Sinus tachycardy			                       13
+       06             Sinus bradycardy			                       25
+       07             Ventricular Premature Contraction (PVC)       3
+       08             Supraventricular Premature Contraction	      2
+       09             Left bundle branch block 		                  9	
+       10             Right bundle branch block		                 50
+       11             1. degree AtrioVentricular block	            0	
+       12             2. degree AV block		                        0
+       13             3. degree AV block		                        0
+       14             Left ventricule hypertrophy 	                4
+       15             Atrial Fibrillation or Flutter	              5
+       16             Others				                               22
+
+Bei einem relativ grossen Anteil der Patienten (54.2%) wurden keine Herzrhytmusstoerungen festgestellt. Die Herzrythmusstoerungsklassen 11-13 haben keine Eintraege. Daraus folgt das wir insgesamt 13 Gruppierungen in unseren Datensatz haben.
+
+
+```{r DatenInspektion 3}
+## uebersetze kategorische Klassifizierungsspalte in Binaere (Krank/nicht krank) Spalte
+temp <- as.numeric(arrhythmia$class)
+isSick <- c()
+for(i in 1:length(temp)){
+  if(temp[i] > 1){
+    isSick[i] <- 1
+  }
+  else{
+    isSick[i] <- 0
+  }
+}
+bmi <- arrhythmia$Weight/(arrhythmia$Height/100)^2
+
+boxplot(arrhythmia$Age~isSick, names=c("Nein","Ja"), col=farben[c(1,4)], 
+        main="Krankheitsfaelle gegen Alter",
+        xlab="Herzrythmusstoerung erkannt", ylab="Alter")
+
+boxplot(bmi~isSick, names=c("Nein","Ja"), col=farben[1:2], 
+        main="Krankheitsfaelle gegen BMI(Gewicht/Hoehe^2",
+        xlab="Herzrythmusstoerung erkannt", ylab="BMI")
+barplot(table(arrhythmia$Sex,isSick),
+        col=farben[1:2] ,main="Krankheitsfaelle gegen Geschlecht",names=c("Nein","Ja"), 
+        xlab="Herzrythmusstoerung erkannt", ylab="Haeufigkeit"); legend("topright",
+                                                                        title="Geschlecht", c("Maenner","Frauen"),cex=0.8, fill = farben[1:2])
+
+```
+
+Aus den Plots fuer Krankheitsfaelle gegen Alter und Krankheitsfaelle gegen BMI kann man keine weiteren Schluesse ziehen, da die Boxplots bis auf ein paar Ausreisser sich nur geringfuegig voneinander unterscheiden.
+
+```{r DatenInspektion 4}
+barplot(table(arrhythmia$Sex,isSick),
+        col=farben[1:2] ,main="Krankheitsfaelle gegen Geschlecht",names=c("Nein","Ja"), 
+        xlab="Herzrythmusstoerung erkannt", ylab="Haeufigkeit"); legend("topright",
+                                                                        title="Geschlecht", c("Maenner","Frauen"),cex=0.8, fill = farben[1:2])
+
+```
+
+Im Plot Krankhaltsfaelle gegen Geschlecht sieht man das Maenner marginal oefter an einer Herzrythmusstoerung leiden als Frauen. Ausserdem wird bei Frauen deutlich oefter negativ auf Herzrythmusstoerung getestet als Maenner.
+
+# Datenaufbereitung
+
+## Datenbereinigung
+
+Da die missing Values bei der weiteren Bearbeitung der Daten stoeren, werden sie vorher bearbeitet. Dazu wird geprueft wieviele Missing Values vorliegen und welche Merkmale am staerksen betroffen sind.
+
+```{r missing value analysis 1}
+## Missing Value Analyse
+table(is.na(arrhythmia))
+table(complete.cases(arrhythmia))
+count.na <- function(x){sum(is.na(x))} 
+
+## J 376 Missing Values
+## loesche J Auspraegung nach der Zusammenfassung um Verrueckung zu vermeiden
+missing <- sapply(arrhythmia,count.na)
+missing[missing>0]
+
+visdat::vis_dat(arrhythmia)
+```
+
+Die Analyse ergibt, dass ein Grossteil der fehlenden Werte in dem "J" Merkmal liegen. Aufgrund des hohen Anteils an Missing Eintraegen in dieser Spalte, wird sie aus dem Datensatz entfernt.
+Die restlichen Missing Werte werden ausgefiltert, da deren Anteil marginal ist.
+
+```{r missing value handling 2}
+## lösche J Auspraegung am Ende der Datenaufbereitung um die Struktur des Datensatzes beizubehalten
+arrhythmia$J <- rep(0,nrow(arrhythmia))
+
+## loesche Zeilen mit NA
+#arrhythmia <- na.omit(arrhythmia)
+## dim(arrhythmia) 420 280
+# na.approx(arrhythmia)
+arrhythmia <- na.omit(arrhythmia)
+```
+
+
+## Zusammenfassung der Kanaele
+
+Um die Interpretationsfaehigkeit unseres Modells zu steigern werden einige Kanaele zusammengefasst. 
+
+```{r pngs1, out.width = "70%"}
+knitr::include_graphics("Extremitaeten_Ableitunghen.jpeg")
+```
+
+Nach Absprache mit Fachexperten haben wir uns dazu entschieden, die Gruppierungen aus der Abbildung umzusetzen.
+
+Die Wellenbreiten werden durch das arithmetische Mittel zusammengefasst und die Amplituden mit einer Funktion die das betragsmaessige Maximum mit Vorzeichen zurueckgibt. 
+Die Amplituden aendern das Vorzeichen abhaengig vom Kanal und vom Individuum, deshalb haben wir uns hier fuer diese Zusammenfassung entschieden
+Die binaeren Aussagen fassen wir ebenfalls zusammen. In der Praxis wird eine Aussage erst als wahr anerkannt, wenn sie von mindestens zwei Kanaelen bestaetigt wird.
+
+```{r Channel Zusammenfassung}
+
+varName <- c("Qwidth","Rwidth","Swidth","R_width","S_width","nIntrinsDefl")
+
+varName1 <- c("D1_aVL","D23_aVF","V1_V2","V3_V4","V5_V6","aVR")
+
+varName2 <- c("JJamp","Qamp","Ramp","Samp","R_amp","S_amp","Pamp","Tamp","QRSAamp","QRSTAamp")
+
+varName3 <- c("Rraggged","Rderiv","Praggged","Pderiv","Traggged","Tderiv")
+
+## in der Praxis nimmt eine Aussage erst fuer wahr wenn sie von 2 Channel bestaetigt wird
+evalTrue <- function(df){
+  temp <-rowSums(as.matrix(df))
+  vec <- c()
+  for(i in 1:length(temp)){
+    if(temp[i] >= 2){
+      vec[i] <- 1
+    }
+    else{
+      vec[i] <- 0
+    }
+  }
+  return(vec)
+}
+## Zusammenfassung der fachlich zusammenhaengende Channels und Umbenennung der aVR bezogenen Zeiten
+for(i in 1:10){
+  if(i <= 6){
+    ## Zusammenfassung der Wellenbreiten
+    arrhythmia$x <-rowMeans(as.matrix(arrhythmia[c(15+i,63+i)]))
+    names(arrhythmia)[names(arrhythmia) == "x"] <- paste0(varName1[1],".",varName[i],".mean")
+    
+    arrhythmia$x <-rowMeans(as.matrix(arrhythmia[c(27+i,39+i,75+i)]))
+    names(arrhythmia)[names(arrhythmia) == "x"] <- paste0(varName1[2],".",varName[i],".mean")
+    
+    arrhythmia$x <-rowMeans(as.matrix(arrhythmia[c(87+i,99+i)]))
+    names(arrhythmia)[names(arrhythmia) == "x"] <- paste0(varName1[3],".",varName[i],".mean")
+    
+    arrhythmia$x <-rowMeans(as.matrix(arrhythmia[c(111+i,123+i)]))
+    names(arrhythmia)[names(arrhythmia) == "x"] <- paste0(varName1[4],".",varName[i],".mean")
+    
+    arrhythmia$x <-rowMeans(as.matrix(arrhythmia[c(135+i,147+i)]))
+    names(arrhythmia)[names(arrhythmia) == "x"] <- paste0(varName1[5],".",varName[i],".mean")
+    
+    arrhythmia$x <-arrhythmia[,(51+i)]
+    names(arrhythmia)[names(arrhythmia) == "x"] <- paste0(varName1[6],".",varName[i])
+  }
+  ## Zusammenfassung der Amplituden
+  
+  ## wir berechnen das betragsmässige Maximum fuer jede Gruppierung da die Amplituden abhaengig vom Kanal und Individuum neg bzw pos sein koennen
+  
+  arrhythmia$x <- arrhythmia[c(159+i,199+i)][cbind(1:nrow(arrhythmia), max.col(abs(arrhythmia[c(159+i,199+i)])))]
+  names(arrhythmia)[names(arrhythmia) == "x"] <- paste0(varName1[1],".",varName2[i],".sigMax")
+  
+  arrhythmia$x <- arrhythmia[c(169+i,179+i,209+i)][cbind(1:nrow(arrhythmia), max.col(abs(arrhythmia[c(169+i,179+i,209+i)])))]
+  names(arrhythmia)[names(arrhythmia) == "x"] <- paste0(varName1[2],".",varName2[i],".sigMax")
+  
+  arrhythmia$x <- arrhythmia[c(219+i,229+i)][cbind(1:nrow(arrhythmia), max.col(abs(arrhythmia[c(219+i,229+i)])))]
+  names(arrhythmia)[names(arrhythmia) == "x"] <- paste0(varName1[3],".",varName2[i],".sigMax")
+  
+  arrhythmia$x <- arrhythmia[c(239+i,249+i)][cbind(1:nrow(arrhythmia), max.col(abs(arrhythmia[c(239+i,249+i)])))]
+  names(arrhythmia)[names(arrhythmia) == "x"] <- paste0(varName1[4],".",varName2[i],".sigMax")
+  
+  arrhythmia$x <- arrhythmia[c(259+i,269+i)][cbind(1:nrow(arrhythmia), max.col(abs(arrhythmia[c(259+i,269+i)])))]
+  names(arrhythmia)[names(arrhythmia) == "x"] <- paste0(varName1[5],".",varName2[i],".sigMax")
+  
+  arrhythmia$x <-arrhythmia[,(189+i)]
+  names(arrhythmia)[names(arrhythmia) == "x"] <- paste0(varName1[6],".",varName2[i])
+}
+for(i in 1:6){
+  ## Auswertung der binaeren Aussagen wird getrennt ausgefuehrt um sie leichter abtrennen zu koennen
+  arrhythmia$x <- evalTrue(arrhythmia[seq(21+i,159,12)])
+  names(arrhythmia)[names(arrhythmia) == "x"] <- paste0(varName3[i],".eval")
+}
+
+## loesche zusammengefasste Spalten und J Spalte
+## dim(arrhythmia) 420 117
+arrhythmia[,c(16:279)] <- NULL
+arrhythmia$J <- NULL
+
+psych::describe(arrhythmia)
+
+```
+
+In der describe() Ausgabe sieht man, dass einige Merkmale konstant den selben Wert aufweisen. Das bedeutet diese Merkmale haben keinen Einfluss auf die Clusterung bzw. koennen zu singulaeren Matrizen fuehren und werden entfernt.
+
+```{r const}
+## entferne Spalten mit Standardabweichung = 0
+## dim(arrhythmia) 420  113
+arrhythmia.omit <- arrhythmia[,apply(arrhythmia, 2, sd)==0] 
+arrhythmia <- arrhythmia[,apply(arrhythmia, 2, sd)>0]
+psych::describe(arrhythmia.omit)
+```
+
+## Untersuchung der univariaten Verteilungen
+
+Bevor wir die Daten anfangen zu Clustern, ist es sinvoll die univariaten Verteilungen der Merkmale zu untersuchen. Zur Veranschaulichung folgen die Histogramme von 6 der 106 numerischen Merkmale.
+
+```{r density}
+par(mfrow = c(2, 3))
+
+## Ausschluss der binaeren Werte da sie bei der Verteilungsuntersuchung anders behandelt werden muessen
+arrhythmia.num <- arrhythmia[,c(1,3:(length(arrhythmia)-6))]
+arrhythmia.bin <- arrhythmia[,-c(1,3:(length(arrhythmia)-6))]
+
+## for(i in 1:ncol(arrhythmia.num)){
+## Beschraenkung die ersten 6 Merkmale zur besseren uebersicht im Bericht
+for(i in 1:6){
+  col <- paste0(names(arrhythmia.num[i])," distribution")
+  hist(arrhythmia.num[,i],breaks=12,col="red",main=col)
+}
+```
+
+### Ausreisser Behandlung
+
+Im Histogramm "Height distribition" kann man zwei eindeutige Ausreisser erkennen. 
+Dabei handelt es sich um 2 Patienten die groesser als 6 Meter sind.
+Solche Faelle wollen wir entfernen, da es sich eindeutig um falsche Daten handelt.
+
+Der folgende Plot zeigt das Histogramm "Height distribition" ohne fehlerhafte Daten.
+
+```{r outlier}
+arrhythmia.bin <- arrhythmia.bin[!(arrhythmia.num$Height>250),]
+arrhythmia.num <- arrhythmia.num[!(arrhythmia.num$Height>250),] 
+col <- paste0(names(arrhythmia.num[2])," distribution")
+hist(arrhythmia.num[,2],col="red",main=col)
+```
+
+Es ist moeglich das noch weitere solche Ausreisser im Datensatz liegen allerdings fehlt uns medizinisch technische Hintergrundwissen um diese korrekt zu erkennen.
+
+### Symmetrie Transformation
+
+In den Histogrammen sind vermehrt rechts- und linksschiefe Verteilungen erkennbar. Unsere Methoden setzen zwar keine ideale Glockenkurvenfoermige Normalverteilung voraus, allerdings koennen schiefe Verteilungen in den einzelnen Merkmalen zu einer heterogenen Distanzmatrix fuehren, was die Differenzierbarkeit im Bereich niedriger Werte verschlechtert.
+Deshalb wenden wir eine Symmetrie Transformation auf alle Merkmale an, die eine schiefe Verteilung aufweisen.
+
+```{r symmetry plot}
+par(mfrow = c(1, 2))
+hist((arrhythmia.num$T_interval),breaks=12,col="red",main="T_interval Distribution", xlab="T_interval",ylab ="Frequency")
+hist(1/(arrhythmia.num$T_interval + 1),breaks=12,col="red",main="Transformed T_interval Distribution", xlab="1/(T_interval + 1)",ylab ="Frequency")
+```
+
+Klassische Methoden zur Symmetrie Transformation sind zum Beispiel $\frac{1}{x}$, $x^2$ oder bei klinischen Daten oftmals verwendet $\log(x)$.
+Viele Transformation, besonders bei rechtsschiefen Verteilungen, setzen positive Werte voraus. Deshalb werden alle negativen Merkmale im Datensatz in positive, mithilfe einer einfachen linear Verschiebung, uebersetzt.
+
+```{r symmetry translation}
+is.negative <- function(vec){
+  for(i in vec){
+    if(i < 0){
+      return(TRUE)
+    }
+  }
+  return(FALSE)
+}
+linScalePos <- function(df){
+  for(i in 1:length(df)){
+    if(is.negative(df[,i])){
+      df[,i] <- df[,i]- min(df[,i])
+    }
+  }
+  return(df)
+}
+arrhythmia.num <- linScalePos(arrhythmia.num)
+```
+
+Um die Verzerrung der Verteilung auszulesen kann man Woelbungs- und Schiefeparameter berechnen. Hier nutzen wir aber nur unser grobes Augenmass, was fuer die begrenzte Anzahl an Merkmalen genuegt.
+Je nach Grad der Schiefe wenden wir folgende Transformationen an.
+Rechtsschiefe Merkmale: $\sqrt{x}$, $log(x+1)$, $\frac{1}{x + 1}$ 
+Linksschiefe Merkmale: $x^2$, $x^3$
+
+
+```{r symmetry transformation}
+
+arrhythmia.num$QRS_duration <- log10(arrhythmia.num$QRS_duration+1)
+arrhythmia.num$P_R_interval <- sqrt(arrhythmia.num$P_R_interval)
+arrhythmia.num$T_interval <- (1/(arrhythmia.num$T_interval + 1))
+arrhythmia.num$QRS <- (arrhythmia.num$QRS)^2
+arrhythmia.num$P <- (arrhythmia.num$P)^2
+arrhythmia.num$D1_aVL.Qwidth.mean <- log10(arrhythmia.num$D1_aVL.Qwidth.mean +1 )
+arrhythmia.num$D23_aVF.Qwidth.mean <- log10(arrhythmia.num$D23_aVF.Qwidth.mean +1)
+arrhythmia.num$aVR.Qwidth <- log(arrhythmia.num$aVR.Qwidth+1)
+arrhythmia.num$D1_aVL.Swidth.mean <- sqrt(arrhythmia.num$D1_aVL.Swidth.mean)
+arrhythmia.num$V5_V6.Swidth.mean <- sqrt(arrhythmia.num$V5_V6.Swidth.mean)
+arrhythmia.num$D1_aVL.Ramp.sigMax <- sqrt(arrhythmia.num$D1_aVL.Ramp.sigMax)
+arrhythmia.num$D23_aVF.Ramp.sigMax <- sqrt(arrhythmia.num$D23_aVF.Ramp.sigMax)
+arrhythmia.num$V1_V2.Ramp.sigMax <- log10(arrhythmia.num$V1_V2.Ramp.sigMax+1)
+arrhythmia.num$V3_V4.Ramp.sigMax <- sqrt(arrhythmia.num$V3_V4.Ramp.sigMax)
+arrhythmia.num$D1_aVL.Samp.sigMax <- (arrhythmia.num$D1_aVL.Samp.sigMax)^3
+arrhythmia.num$D23_aVF.Samp.sigMax <- (arrhythmia.num$D23_aVF.Samp.sigMax)^3
+arrhythmia.num$V1_V2.Samp.sigMax <- (arrhythmia.num$V1_V2.Samp.sigMax)^2
+arrhythmia.num$V3_V4.Samp.sigMax <- (arrhythmia.num$V3_V4.Samp.sigMax)^3
+arrhythmia.num$V5_V6.Samp.sigMax <- (arrhythmia.num$V5_V6.Samp.sigMax)^3
+arrhythmia.num$D1_aVL.nIntrinsDefl.mean <- sqrt(arrhythmia.num$D1_aVL.nIntrinsDefl.mean)
+arrhythmia.num$V1_V2.nIntrinsDefl.mean <- log(arrhythmia.num$V1_V2.nIntrinsDefl.mean+1)
+arrhythmia.num$D23_aVF.QRSAamp.sigMax <- (arrhythmia.num$D23_aVF.QRSAamp.sigMax)^2
+arrhythmia.num$aVR.QRSAamp <- (arrhythmia.num$aVR.QRSAamp)^2
+arrhythmia.num$D1_aVL.Tamp.sigMax <- (arrhythmia.num$D1_aVL.Tamp.sigMax)^2
+arrhythmia.num$aVR.QRSAamp <- (arrhythmia.num$aVR.QRSAamp)^2
+arrhythmia.num$V1_V2.QRSTAamp.sigMax <- sqrt(arrhythmia.num$V1_V2.QRSTAamp.sigMax)
+arrhythmia.num$aVR.QRSTAamp <- (arrhythmia.num$aVR.QRSTAamp)^2
+```
+
+## Standardisierung
+
+Da die Merkmale von sehr verschiedener Natur sind, wie Gewicht, Hoehe, Alter, Millivolt und Millisekunden, ist es fuer sinnvoll eine standardisierung der Merkmale durchzufuehren. D.h. bei jedem Merkmal wird der Mittelwert auf 0 und die Standardabweichung auf 1 gesetzt.
+
+$Z=\frac{X - \mu}{\sigma}$
+
+```{r standardisation}
+trueclus <- arrhythmia.num$class
+arrhythmia.num$class <- NULL
+arrhythmia.num <-scale(arrhythmia.num)
+arrhythmia.num <- as.data.frame(arrhythmia.num)
+
+arrhythmia <- cbind(arrhythmia.num,arrhythmia.bin)
+```
+
+# Hauptkomponentenanalyse
+
+Mit der Hauptkomponentanalyse werden Lineakombinationen unserer Merkmale bestimmt, die einen moeglichst grossen Anteil der Varianz innerhalb des Datensatzes erklaeren.
+Zur Bestimmung der Anzahl der Hauptkomponenten wird zunaechst ein Scree Plot betrachtet der die Groesse der Eigenwerte gegen die dazugehoerigen Hauptkomponenten darstellt.
+
+```{r Eigenwerte }
+PCarrhythmia <- prcomp(arrhythmia)
+EVarrhythmia <- eigen(cor(arrhythmia))
+VSS.scree(arrhythmia)
+```
+
+Ein gaengiges Kriterium ist eine Mindestvarianz der Hauptkomponenten von 1. Damit wuerden hier schon bis zu 30 Komponenten gewaehlt werden. Nach dem Elbow Kriterium waeren 13 auch Komponenten moeglich.
+Oftmals werden auch soviele Komponenten genommen wie benoetigt werden, um mindestens 80 % der Gesamtvarianz zu erklaeren.
+Fuer einen besseren Ueberblick zunaechst die ersten 30 Hauptkomponenten untersucht.
+
+```{r PCA unrotatated }
+unrot30 <- principal(arrhythmia,30,rotate="none")
+unrot30
+```
+
+Die ersten 13 Hauptkomponenten erklaeren 61% Gesamtvarianz, was in der Regel zu gering ist.
+Der Eigenwert der 29. Hauptkomponente ist 1.004722 und der Eigenwert der 30. Hauptkomponente ist 0.959373. Das heisst wir koennten 29 waehlen, um eine Mindestvarianz der Eigenwerte von 1 zu erfuellen.
+Um 80% der kumulierten Gesamtvarianz erklaeren zu koennen benoetigt man mindestens 27 Hauptkomponenten.
+
+```{r PCA cumvar }
+cumprob <- cumsum(PCarrhythmia$sdev^2 / sum(PCarrhythmia$sdev^2))
+plot(cumprob[0:112], xlab = "Hauptkomponente", ylab = "Erklaerte Varianz",
+     main = "Kumulierte Varianz")
+abline(h=0.8, col=farben[1],lwd=2)
+abline(h=0.5, col=farben[3],lwd=2)
+legend("bottomright",title="Kumuliertes Varianz",c("80 % erklaerte Varianz","50 % erklaerte Varianz"),cex=1, fill = farben[c(1,3)])
+```
+
+Um 80% der Varianz zu erklaeren werden  27 Hauptkomponenten benoetigt. Um eine bessere Interpretierbarkeit zu erreichen, werden die ersten 13 Hauptkomponenten nach dem Ellenbogen-Kriterium gewaehlt und eine Reduktion auf 61% erklaerte Varianz toleriert..
+
+Es ist ausserdem sinnvoll die ersten beiden Hauptkomponenten genauer zu untersuchen, da diese mit 19% bereits einen relativ grossen Teil der Varianz unseres Datensatzes erklaeren.
+
+```{r biplot HKA,out.width = "150%"}
+par(mar=c(4,4,4,4))
+biplot(PCarrhythmia, cex=0.6, xpd=NA, pch=1)
+
+```
+
+Der Biplot beschreibt die Ladungen der ersten beiden Hauptkomponenten und plottet die Patienten als Punkte auf das orthoganlen Koordinatensystem das daraus gebildet wird.
+
+Aus dem Biplot geht hervor, das die Merkmale bezueglich des Anteils an den zwei ersten Hauptkomponenten keine ersichtbare Tendenz haben.
+
+```{r Plot norot loadings,out.width = "140%"}
+norot13 <- principal(arrhythmia, nfactors=13,rotate="none")
+par(mar=c(4,6,4,4))
+plot(norot13$loadings, las=1,cex.axis=0.7,text.cell=list(cex=0.6),main="Ladungen ohne Rotation")
+
+```
+
+Man sieht das einige Merkmale mit mehr als nur einer Hauptkompente Korrelieren und viele kleine Korrelationen noch mitenthalten sind. Um die Interpretierbarkeit zu erhoehen, fuehren wir zusaetzlich eine Rotation der Hauptkomponenten mit Varimax durch. 
+Im Plot werden die Loadings farblich dargestellt. Je groesser die Loadings umso dunkler wird das Feld eingefaerbt. In unseren Hauptkompenten liegen noch viele loadings die betragsmaessig kleiner als 0.5 sind, das kann man mit der Varimax Transformation aendern.
+
+
+```{r Plot rot loadings,out.width = "140%"}
+rot13 <- principal(arrhythmia, nfactors=13,rotate="varimax")
+par(mar=c(4,6,4,4))
+plot(rot13$loadings, las=1,cex.axis=0.7,text.cell=list(cex=0.6),main="Ladungen mit Rotation")
+
+```
+
+Varimax ist ein orthogonales Roationsverfahren bei dem die Basis rotiert wird. Das Verfahren maximiert die Summe der Varianzen der quadrierten Ladungen und bewahrt dabei die Orthogonalitaet. Ist die Varianz der Ladungen einer Hauptkomponente nahe 0, so wird diese noch weiter reduziert. Liegen sehr hohe Varianz der Ladungen vor, wird diese verstaerkt.
+
+Man kann erkennen das die Trennung der Korrelation mit den verschiedenen Merkmalen unter den Hauptkompenten deutlicher geworden ist. Viele schwaechere Korrelationen sind marginal klein geworden und die fuer die Hauptkompente relevantesten Merkmalskorrelationen sind groesser geworden, was man an den dunkleren Flaechen erkennen kann.
+
+Ausserdem geht aus den Loadings hervor das die relevantesten Merkmale die Amplituden unseres EKG Datensatzes sind. Das macht allerdings fachlich weniger Sinn da die Amplituden eine geringere Relevenz zur Erkennung von Herzrythmusstoerungen haben.
+
+# Clusteranalyse
+
+In diesen Abschnitt werden eine hierarchische Clusteranalyse durchgefuert und die Ergebnisse diskutiert.
+
+## Bestimmung der Distanzmatrix
+
+Zur Ausfuehrung der Clusteranalyse wird zunaechst eine Distanzmatrix berechnet. Da in unseren Datensatz gemischte Datentypen (binaer und numerisch), vorliegen, wird die Gower Distanz genutzt, die binaere Werte beruecksichtigt und somit eine repraesentative Distanzmatrix erzeugt. 
+
+```{r dist gower}
+dd <- daisy(arrhythmia,metric="gower")
+```
+
+## Auswahl des Fusionsalgorithmus
+
+Als naechstes wird eine hierarchische Clusteranalyse mit verschiedenen Fusionsalgorithmen durchgefuehrt, um die geeignetste Methode zu bestimmen. 
+
+```{r find Cluster methods}
+hier.ave <- hclust(dd, method="average")
+cor_cophenetic(hier.ave, dd)
+
+hier.complete <- hclust(dd, method="complete")
+cor_cophenetic(hier.complete, dd)
+
+hier.wardD2 <- hclust(dd, method="ward.D2")
+cor_cophenetic(hier.wardD2, dd)
+```
+
+Man kann erkennen des die Korrelation zwischen den Clustern und der Distanzmatrix mit der Ward.D2 Methode mit 0.3849 eher gering ist, mit Complete ist Korrelation auf 0.5906 schon etwas besser, aber immer noch nicht besonders gut. 
+Die beste Korrelation erhalten wir mit der average linkage Methode mit 0.8239. 
+Allerdings ist das Korrelationsmass kein allein entscheidendes Guetemass fuer Clusterungen. Deshalb wird als naechstes das Dendrogramm fuer die drei Fusionsalgorithmen ausgegeben.
+
+```{r Dendrogramm}
+plot(hier.ave)
+plot(hier.complete)
+plot(hier.wardD2)
+```
+
+In den Dendrogrammen sieht man, dass sich mit average ein sehr grosses Cluster bildet. Das liegt vermutlich am grossen Anteil von gesunden Patienten im Datensatz. Das Dendrogram fuer die complete Clusterung Verh?lt sich aehnlich, wobei schon ersitchlich ist, dass sich die Daten hier besser verteilen. 
+Im Dendrogramme der Clusterung der ward.D2 Methode kann man erkennen, dass die Cluster deutlich gleichmaessiger verteilt sind. 
+Damit kann man aber auch schon sagen, dass diese Cluster nicht mit unserer wahren Klassifzierung uebereinstimmen kann. D.h. der Anteil der "kranken" Patienten wird nicht korrekt wiedergespiegelt.
+
+Im weiteren Verlauf des Berichts wird der Fokus auf die Clusterung mit der complete und wardD2 Methode gelegt. Da average und complete beide ein sehr grosses Cluster erzeugen, und complete etwas besser verteilt ist, arbeiten wir mit complete weiter.
+WardD2 betrachten wir weiterhin, um eine klassichere Clusterung zur Analyse zu haben, weil das das Ziel dieses Projektes ist. 
+
+## Bestimmung der optimalen Clusteranzahl
+
+Um eine Entscheidung ueber die Anzahl der Cluster treffen zu koennen, erstellen wir als naechstes ein scree Plot. 
+
+```{r scree Plot complete}
+cluslist.complete <- lapply(1:13, 
+                   function(obj)
+                     cutree(hier.complete, obj))
+
+funclus.complete <- function(x, k){
+  clus <- list(cluster=cluslist.complete[[k]])
+}
+
+gap.complete <- clusGap(arrhythmia, funclus.complete, K.max=13)
+plot(gap.complete,main="Scree Plot mit Cluster mit Complete",ylab = "Anzahl der Cluster")
+print(gap.complete)
+
+print(gap.complete, method="Tibs2001SEmax")
+```
+
+Im Scree Plot der complete Clusterung kann man erkennen das nach der Ellenbogen Methode 4, 7 und 11 Cluster sinnvoll sein koennten. Da es allerdings ratsam ist, die Anzahl der Cluster zunaechst gering zu halten, entscheiden wir uns fuer 4 Cluster. Die Auswertung nach 'Tibs2001SEmax' empfiehlt ebenfalls 4 Cluster.
+
+```{r scree Plot wardD2}
+cluslist.wardD2 <- lapply(1:15, 
+                   function(obj)
+                     cutree(hier.wardD2, obj))
+
+funclus.wardD2 <- function(x, k){
+  clus <- list(cluster=cluslist.wardD2[[k]])
+}
+
+gap.wardD2 <- clusGap(arrhythmia, funclus.wardD2, K.max=15)
+plot(gap.wardD2,main="Scree Plot mit Cluster mit Ward.D2",ylab = "Anzahl der Cluster")
+print(gap.wardD2)
+
+print(gap.wardD2, method="Tibs2001SEmax")
+```
+
+Im Scree Plot der ward.D2 Clusterung sind nur sehr kleine Spruenge zu erkennen. Nach dem Elbow Kriterium koennte man sich hier fuer 6 oder 12 Cluster entscheiden. Die Auswertung nach 'Tibs2001SEmax' empfiehlt ebenfalls 12 Cluster. Da unsere wahre Clusterung auch aus 12 Clustern besteht entscheiden wir uns dafuer.
+
+
+
+
+```{r silhouette plot}
+clusters=cutree(hier.wardD2, 12)
+
+sil.ave <- silhouette(clusters, dd)
+fviz_silhouette(sil.ave)
+
+```
+
+Die durchschnittliche Silhouttenbreite ist mit 0.07 eher klein. Die Cluster 3, 8, 11 und 12 sind sehr klein im Vergleich zu den anderen Clustern, die ansonsten alle eine aehnliche groessenordnung haben. Cluster 3 scheint fast nur Elemente im negativen Bereich zu haben, d.h. in diesem Cluster liegen viele Elemente die sehr nahe an anderen Clustern liegen. Waehrend sich Cluster 10 abhebt da dort nur Werte im positiven Bereich vorliegen, d.h. die Elemente diese Clusters haben alle eine groessere Entfernung zu den anderen Clustern.
+
+## Betrachtung der Cluster mit allen Patienenten
+
+Um die Qualitaet der Clusterung besser beurteilen zu koennen, wird eine Tabelle ausgegeben die die Cluster mit der wahren Klassifizierung vergleicht.
+Um zu erkennen ob eine Herzrythmusstoerungsklasse erfolgreich geclustert wurde wird beobachtet, ob sich die Patienten der jeweiligen Klasse in einen oder mehreren Clustern ansammeln und diese Cluster nur von dieser einen Klasse bzw nur von kranken Patienten besetzt wird.
+Hilfreich ist hier auch die Heatmap.
+Die Cluster in denen gesunde und kranke Patienten durchmischt sind, werden als "gesunde" Cluster interpretiert.
+
+```{r Clusterung inkl. Gesunde complete}
+heat.complete4 <- table(cluslist.complete[[4]], trueclus)
+heat.complete4
+heatmap(heat.complete4,main="Heatmap: 4 complete Cluster",xlab = "wahre Cluster")
+heat.complete11 <- table(cluslist.complete[[11]], trueclus)
+heat.complete11
+heatmap(heat.complete11,main="Heatmap: 11 complete Cluster",xlab = "wahre Cluster")
+```
+
+Man kann erkennen das bei einer Clusterung mit complete Linkage und vier Clustern eine grosse Gruppe entsteht in der beinahe alle Patienten liegen. Patienten mit Herzrythmusstoerungen der Klasse zwei, drei, fuenf und zehn sammeln sich in zwei anderen Clustern, aber Patienten dieser Klasse auch im grossen Cluster mit den gesunden Patienten gemischt liegen sind sie nicht gut geclustert.
+Als Erfolg laesst sich verbuchen, dass die Herzrythmusstoerungsklasse 9 sehr gut geclustert wurde. Im vierten Cluster liegen nur Patienten dieser Klasse und man findet sie in keinen anderen Cluster wieder.
+
+Bei elf Clustern der complete Methode kann man erkennen, dass wieder ein dominantes Cluster entsteht in dem kranke und gesunde Patienten liegen. Ausserdem entstehen drei weitere Cluster die ebenfalls mit kranken und gesunden Patienten durchmischt sind. 
+In den restlichen acht Clustern liegen nur kranke Patienten. Jedoch ist die groese die Cluster sehr klein. 
+Die Herzrythmusstoerungsklassen neun wurde in unseren Model wieder gut geclustert. Daraus folgt das dieses Modell die Klasse neun (Linksschenkelblock) gut erkennen kann.
+
+```{r Clusterung inkl. Gesunde wardD2}
+heat.wardD26 <- table(cluslist.wardD2[[6]], trueclus)
+heat.wardD26
+heatmap(heat.wardD26,main="Heatmap: 6 wardD2 Cluster",xlab = "wahre Cluster")
+heat.wardD212 <- table(cluslist.wardD2[[12]], trueclus)
+heat.wardD212
+heatmap(heat.wardD212,main="Heatmap: 12 wardD2 Cluster",xlab = "wahre Cluster")
+```
+
+Bei der Ward.D2 Methode stellen kann man erkennen, dass sich kein dominantes Cluster wie mit complete bildet. Jedoch sind die gesunden und kranken Patienten wieder stark durchmischt. Die Herzrythmusstoerungsklasse neun laesst sich bis auf einen Fall der in ein gemischtes Cluster gerutscht ist wieder gut clustern
+Zusaetzlich faellt bei mit der Ward.D2 Methode auf das die Klasse bis auf einen Fall gut geclustert wurde.
+
+In der Heatmap kann man eine "gute" Clusterung daran erkennen, dass nur ein dunkles Element in einer gesamten Zeile und Spalt existiert. Wie hier bei 3 und 9 der Fall ist.
+
+Nach weiteren Analysen und Recherchen haben wir festgestellt, dass unsere Mittel nicht gut genug geeignet sind, um eine gute Prognose fuer diesen Datensatz zu liefern. Andere Vorschlaege zur Bearbeitung dieses Datensatzes waren beispielsweise neuronale Netzwerke, die auf lernenden Vektorquantisierungen basieren oder Dimensionsreduktion mithilfe einer Hauptkomponentenanalyse, gefolgt von sechs neuronalen Netzwerken zur Klassifizierung als "Normal" oder "Herzrythmusstoerung". 
+Die Dimensionsreduktion mit Hauptkomponentenanalyse werden wir im folgenden noch selber diskutieren und ausfuehren. Allerdings koennen wir mit unseren Mitteln keine ideale Clusterung erwarten.
+Zusaetzlich testen wir, ob das Ausfiltern der gesunden Patienten zu einer besseren Clusterung zwischen den kranken Patienten fuehren koennte. 
+
+
+## Betrachtung der Cluster ohne gesunde Patienten
+
+Da die bisherige Clusterung nicht zufriedenstellend war, werden als naechstes versucht nur die kranken Patienten geclustern und dafuer die die gesunden Patienten ausgefiltert.
+
+```{r Clusterung der kranken Patienten}
+arrhythmia.sick <- arrhythmia[(trueclus>1),]
+sick.trueclus <- trueclus[(trueclus>1)]
+dim(arrhythmia.sick)
+```
+
+Damit wird der Datensatz auf 181 Patienten reduziert.
+
+
+```{r Screeplot Kranke wardD2}
+dd.sick <- daisy(arrhythmia.sick,metric="gower") 
+hier.wardD2.sick <- hclust(dd.sick, method="ward.D2")
+
+cluslist.wardD2.sick <- lapply(1:13, 
+                   function(obj)
+                     cutree(hier.wardD2.sick, obj))
+
+funclus <- function(x, k){
+  clus <- list(cluster=cluslist.wardD2.sick[[k]])
+}
+
+gap.wardD2.sick <- clusGap(arrhythmia.sick, funclus, K.max=13)
+plot(gap.wardD2.sick,main="Kranke:Scree Plot mit Cluster mit Ward.D2",ylab = "Anzahl der Cluster")
+print(gap.wardD2.sick, method="Tibs2001SEmax")
+
+```
+
+
+```{r Screeplot Kranke complete}
+dd.sick <- daisy(arrhythmia.sick,metric="gower") 
+hier.complete.sick <- hclust(dd.sick, method="complete")
+
+cluslist.complete.sick <- lapply(1:13, 
+                               function(obj)
+                                 cutree(hier.complete.sick, obj))
+
+funclus <- function(x, k){
+  clus <- list(cluster=cluslist.complete.sick[[k]])
+}
+
+gap.complete.sick <- clusGap(arrhythmia.sick, funclus, K.max=13)
+plot(gap.complete.sick,main="Kranke:Scree Plot mit Cluster mit complete",ylab = "Anzahl der Cluster")
+print(gap.complete.sick, method="Tibs2001SEmax")
+
+```
+
+Wir erstellen einen Screeplot fuer die Clusterung des Datensatzes ohne gesunde Patienten nach der complete und Ward.D2 Clusterung.
+Erneut wenden wir zur Ermittlung einer geeigneten Clusteranzahl die Ellenbogen Methode bei der Betrachtung der Screeplots an. Aus den Screeplots der wardD2 geht hervor, dass sich eine Wahl von 7 oder 11 Clustern anbietet. Aus dem complete Scree Plot geht hervor das 4 Cluster am meisten Sinn machen.
+
+Zur Ermittlung der optimalen Clusteranzahl wird ein Screeplot fuer die complete und ward.D2 Clusterung erstellt und mithilfe der Ellenbogen Methode und Tibs2001SEmax ausgewertet
+```{r Clusterung der Kranken wardD2}
+heat.wardD27<-table(cluslist.wardD2.sick[[7]], sick.trueclus)
+heat.wardD27
+heatmap(heat.wardD27,main="Heatmap: 7 wardD2 Cluster",xlab = "wahre Cluster")
+heat.wardD211<-table(cluslist.wardD2.sick[[11]], sick.trueclus)
+heat.wardD211
+heatmap(heat.wardD211,main="Heatmap: 11 wardD2 Cluster",xlab = "wahre Cluster")
+```
+
+```{r Clusterung der Kranken complete}
+heat.complete4<-table(cluslist.complete.sick[[4]], sick.trueclus)
+heat.complete4
+heatmap(heat.complete4,main="Heatmap: 4 complete Cluster",xlab = "wahre Cluster")
+```
+Aus den neuen Clusterungen, mit Ward.D2 und Complete, geht hervor, dass die Herzrythmusstoerungsklasse 9 gut geclustert wird mit weiterhin einen Patienten im Misch Cluster. Alles in allem kann man aber nicht von einer besseren Clusterung als bei der Clusterung mit allen Patienten, da mit allen die Herzrythmusstoerungsklasse zusaetzlich korrekt gecluster werden konnte.
+
+## Fazit 
+
+Die Klassifizierung des Arrhytmia Datensatzes mit hierarchischer Clusterung spiegelt wie zu erwarten die wahre Klassifizierung nur teilweise wieder. Es konnten mithilfe der Ward.D2 Methode Herzarrythmien der Klasse 3 (alter Vorderwandinfarktes) und 9 (Linksschenkelblock) geclustert werden.
+
+In der Hauptkomponentenanalyse haben wir unseren Datensatz auf 13 Hauptkomponenten mit 16% erklaerter Varianz reduziert. Auffaellig ist dabei das die ersten Hauptkomponenten hauptsaechlich die Varianz Amplituden unseres EKG's erklaeren. Das hat womoeglich zur Folge das unsere spaetere Clusterung auch nicht besonder gut wird. 
+
+Um eine bessere Clusterung zu erhalten koennte man eine fachliche Gewichtung der relevanteren Merkmale einfuehren. Als Methoden zur Dimensionsreduktion gibt es neben PCA auch noch weitere die fuer unseren Datensatz eventuell besser geeignet gewesen waeren und zur Klassifzierung koennte man noch Methoden wie Random Forest heranziehen.
+
